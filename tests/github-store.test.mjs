@@ -43,3 +43,10 @@ test('unsupported large-file response and oversize writes fail before committing
   const unsupported=new GitHubStore(defaultRepository,'test-token',async()=>response({type:'file',encoding:'none',content:'',sha:'old'}));
   await assert.rejects(unsupported.read(),/1 MB/);
 });
+test('request functions receive the browser global as receiver',async()=>{
+  const store=new GitHubStore(defaultRepository,'',async function(){
+    assert.equal(this,globalThis);
+    return response({type:'file',encoding:'base64',content:encodeContent(value),sha:'browser-sha'});
+  });
+  assert.deepEqual(await store.read(),value);
+});

@@ -14,7 +14,7 @@ export class GitHubStore {
   constructor(config,token='',request=globalThis.fetch) {
     for(const key of ['owner','repo'])if(!/^[a-zA-Z0-9_.-]+$/.test(config[key]||''))throw Error('仓库所有者或名称格式不正确。');
     if(!config.branch?.trim())throw Error('请填写保存分支。');
-    this.config={...config,path:defaultRepository.path};this.#token=token;this.request=request;this.sha=null;this.loaded=false;
+    this.config={...config,path:defaultRepository.path};this.#token=token;this.request=request.bind(globalThis);this.sha=null;this.loaded=false;
   }
   get writable(){return !!this.#token;}
   disconnect(){this.#token='';this.loaded=false;}
