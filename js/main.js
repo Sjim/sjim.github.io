@@ -1,11 +1,12 @@
+import { AutoSave } from './auto-save.js';
 import savedCredentials from './github-credentials.js';
 import { decryptCredentials } from './credential-codec.js';
 import { GitHubStore, defaultRepository } from './github-store.js';
 const $ = (s) => document.querySelector(s);
 const escape = (s = '') => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const blank = () => ({version:1,blogs:[],notes:[],timeline:[],messages:[]});
-let data = blank(), scores = [], directory, dirty = false, active = 'blog', query = '', editing, writing = Promise.resolve();
-let github, githubBusy = false, revision = 0, connectionError = '';
+let data = blank(), scores = [], dirty = false, active = 'blog', query = '', editing;
+let github, autosave, loadedBase, revision = 0, connectionError = '';
 let name = '';
 try { name = localStorage.getItem('lsn-name') || ''; } catch {}
 const channel = 'BroadcastChannel' in window ? new BroadcastChannel('lsn-chat') : null;
@@ -20,7 +21,7 @@ function photoURL(path) {
   return '';
 }
 function validate(value) {
-  if (!value || value.version !== 1 || !['blogs','notes','timeline','messages'].every(k=>Array.isArray(value[k]))) throw Error('文件格式不正确，请导入本站导出的 JSON。');
+  if (!value || value.version !== 1 || !['blogs','notes','timeline','messages'].every(k=>Array.isArray(value[k]))) throw Error('仓库 JSON 数据格式不正确。');
   const ids=new Set();
   for(const k of ['blogs','notes','timeline','messages']) for(const row of value[k]) {
     if(!row || typeof row.id!=='string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(row.id) || ids.has(row.id)) throw Error('记录 ID 缺失或重复。'); ids.add(row.id);
@@ -31,13 +32,26 @@ function validate(value) {
   }
   return value;
 }
-async function persist() {
-  dirty=true;revision++;updateGitHubState();
-  if(github){toast('已更新，点击“数据与文件”提交到 GitHub');return;}
-  if (!directory) { toast('已更新，请在“数据与文件”中保存 JSON'); return; }
-  const json=JSON.stringify(data,null,2), savedRevision=revision;
-  writing=writing.catch(()=>{}).then(async()=>{const folder=await directory.getDirectoryHandle('data',{create:true}); const file=await folder.getFileHandle('content.json',{create:true}); const writer=await file.createWritable(); await writer.write(json); await writer.close();});
-  try {await writing; if(revision===savedRevision)dirty=false; toast('已保存到 data/content.json');} catch {toast('文件保存失败，请重新绑定目录或导出 JSON');}
+function syncState(state,error){
+  const status=$('#sync-status');
+  status.textContent=state==='saving'?'正在保存…':state==='saved'?'已自动保存':error?.message||'自动连接未完成';
+  status.dataset.state=state;
+  $('#sync-retry').hidden=state!=='error';
+  $('#sync-retry').disabled=!loadedBase;
+  if(state==='error')toast('自动保存失败，修改已保留，请勿关闭页面');
+}
+async function persist(){
+  dirty=true;revision++;
+  if(!autosave){syncState('error',Error(connectionError||'尚未连接 GitHub，请重试'));return;}
+  await autosave.update(data);
+}
+function prepareAutoSave(initial=data){
+  autosave=new AutoSave(github,initial,{validate,onState:syncState,onSaved:(latest,clean)=>{
+    const changed=JSON.stringify(latest)!==JSON.stringify(data);
+    data=latest;dirty=!clean;
+    if(changed){if(active==='chat')renderMessages();else if($('#list'))renderList();}
+  }});
+  if(!dirty)syncState('saved');
 }
 function empty(title, description, symbol='＋') { return `<div class="empty"><span class="symbol">${symbol}</span><h2>${title}</h2><p>${description}</p></div>`; }
 function render() {
@@ -77,7 +91,7 @@ function renderMessages() {
   $('#messages').innerHTML=data.messages.length?[...data.messages].sort((a,b)=>a.created.localeCompare(b.created)).map(m=>`<div class="message ${m.name===name?'mine':''}"><p class="meta">${escape(m.name)} · ${escape(new Date(m.created).toLocaleString('zh-CN'))}</p><div class="message-body">${escape(m.content)}</div></div>`).join(''):empty('还没有消息','写一句话，开启这里的对话。','〰');
   $('#messages').scrollTop=$('#messages').scrollHeight;
 }
-channel?.addEventListener('message',async e=>{try{const test=blank();test.messages=[e.data];validate(test);if(data.messages.some(m=>m.id===e.data.id))return;data.messages.push(e.data);renderMessages();await persist();}catch{}});
+channel?.addEventListener('message',async e=>{try{const test=blank();test.messages=[e.data];validate(test);if(data.messages.some(m=>m.id===e.data.id))return;data.messages.push(e.data);renderMessages();}catch{}});
 $('#editor-form').onsubmit=async e=>{
   e.preventDefault();const form=e.target.elements;const save=e.submitter || e.target.querySelector('button[type="submit"]');save.disabled=true;
   try {
@@ -107,63 +121,40 @@ $('#page').addEventListener('click',async e=>{
 for(const b of document.querySelectorAll('[data-tab]'))b.onclick=()=>location.hash=b.dataset.tab;
 $('nav').addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const tabs=[...document.querySelectorAll('[data-tab]')];let i=tabs.indexOf(document.activeElement);i=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;tabs[i].focus();tabs[i].click();});
 for(const b of document.querySelectorAll('[data-close]'))b.onclick=()=>b.closest('dialog').close();
-function updateGitHubState(message) {
-  $('#github-state').textContent=message || (github ? `已连接 ${github.config.owner}/${github.config.repo} · ${github.config.branch}。${dirty?'有修改待提交。':'内容已同步。'}` : connectionError || '尚未连接 GitHub。');
-  $('#github-save').disabled=!github||githubBusy||!dirty;
-  $('#github-reload').disabled=githubBusy;
-}
-$('#github-save').onclick=async()=>{
-  if(!github||githubBusy||!dirty)return;
-  const store=github,savedRevision=revision,snapshot=structuredClone(data);
-  githubBusy=true;updateGitHubState('正在提交到 GitHub…');
-  try{
-    await store.save(snapshot);
-    if(revision===savedRevision)dirty=false;
-    githubBusy=false;updateGitHubState(dirty?'提交成功，期间新增的修改仍待提交。':'已提交到 GitHub，等待 Pages 部署后网站将更新。');
-    toast('已提交到 GitHub');
-  }catch(err){githubBusy=false;updateGitHubState(err.message);}
-};
-$('#storage-button').onclick=()=>{updateGitHubState();$('#bind-directory').hidden=!!github;$('#storage-state').textContent=github?'已自动连接 GitHub，也可导出 JSON 备份。':directory?'已绑定项目目录，编辑自动写入 data/content.json。':'尚未绑定目录，编辑仅保留在本次页面会话中。请导出 JSON 保存。';$('#storage').showModal();};
-$('#bind-directory').onclick=async()=>{
-  if(github||githubBusy){toast('GitHub 已自动连接，请使用 JSON 导出进行本地备份');return;}
-  if(!window.showDirectoryPicker){toast('当前浏览器不支持目录保存，请使用 JSON 导入导出');return;}
-  try {
-    const selected=await showDirectoryPicker({mode:'readwrite'});
-    let existing;try{const folder=await selected.getDirectoryHandle('data');const file=await folder.getFileHandle('content.json');existing=validate(JSON.parse(await (await file.getFile()).text()));}catch(err){if(err.name!=='NotFoundError')throw err;}
-    if(existing){if(!confirm('绑定后将载入目录中的 content.json，替换当前会话数据。是否继续？'))return;data=existing;dirty=false;}
-    else if(!confirm('将在所选目录中创建 data/content.json 并保存当前数据。是否继续？'))return;
-    directory=selected;await persist();$('#storage-state').textContent='已绑定目录，编辑自动写入 data/content.json。';render();
-  }catch(err){if(err.name!=='AbortError')toast(err.message||'目录绑定失败');}
-};
-$('#export-data').onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='content.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('已导出，请将文件保存到项目 data 目录');};
-$('#import-data').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;const imported=validate(JSON.parse(await file.text()));if(!confirm('导入将替换当前全部记录。确定继续？'))return;data=imported;render();await persist();}catch(err){toast(err.message||'导入失败');}finally{e.target.value='';}};
 async function route(){const [tab,index]=location.hash.slice(1).split('/');active=tab in titles?tab:'blog';query='';render();if(active==='scores'&&index!==undefined){const score=scores[Number(index)];if(!score){toast('琴谱不存在');return;}$('#content').innerHTML=`<a class="back" href="#scores">← 返回琴谱列表</a><h2 style="margin-top:24px">${escape(score.title)}</h2><p class="meta">共 ${score.imgs.length} 页 · 点击图片查看原图</p><div class="score-pages">${score.imgs.map(p=>`<a href="${escape(p)}" target="_blank" rel="noopener"><img src="${escape(p)}" alt="${escape(score.title)}" loading="lazy"></a>`).join('')}</div>`;}}
 window.addEventListener('hashchange',route);
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
-async function readInitialContent(reload=false){
-  const startRevision=revision;
+async function readInitialContent(){
   if(savedCredentials.enabled){
     let candidate;
     try{
       const token=await decryptCredentials(savedCredentials);
       if(!token.trim())throw Error('自动连接令牌为空，请检查 github-credentials.js。');
       candidate=new GitHubStore(savedCredentials.repository,token);
-      const latest=validate(await candidate.read());
-      if(revision!==startRevision)throw Error('载入期间内容发生修改，已保留当前编辑，请备份后重试。');
-      github?.disconnect();github=candidate;directory=undefined;data=latest;dirty=false;revision++;
-      if(reload)render();
-      connectionError='';updateGitHubState();return;
-    }catch(err){candidate?.disconnect();connectionError=err.message;updateGitHubState(err.message);toast('自动连接失败，请检查配置或网络后重新载入');if(reload)return;}
-  }
-  if(reload){connectionError='自动连接未启用，请检查 github-credentials.js。';updateGitHubState();return;}
+      data=validate(await candidate.read());github=candidate;connectionError='';prepareAutoSave();return;
+    }catch(err){candidate?.disconnect();connectionError=err.message;syncState('error',err);}
+  }else{connectionError='自动连接未启用，请检查 github-credentials.js。';syncState('error',Error(connectionError));}
   try{data=validate(await new GitHubStore(savedCredentials.enabled?savedCredentials.repository:defaultRepository).read());}
   catch{try{const response=await fetch('data/content.json');if(!response.ok)throw Error();data=validate(await response.json());}catch{toast('数据文件读取失败，请检查 data/content.json');}}
 }
-$('#github-reload').onclick=async()=>{
-  if(githubBusy)return;
-  if(dirty&&!confirm('重新载入会替换当前未提交的修改，请先导出备份。是否继续？'))return;
-  githubBusy=true;updateGitHubState('正在重新载入仓库内容…');
-  try{await readInitialContent(true);}finally{githubBusy=false;$('#github-reload').disabled=false;$('#github-save').disabled=!github||!dirty;}
+let retrying=false;
+$('#sync-retry').onclick=async()=>{
+  if(retrying||!loadedBase)return;retrying=true;$('#sync-retry').disabled=true;
+  try{
+    if(autosave){await autosave.flush();return;}
+    syncState('saving');
+    const token=await decryptCredentials(savedCredentials);
+    if(!token.trim())throw Error('自动连接未配置可用令牌。');
+    const candidate=new GitHubStore(savedCredentials.repository,token);
+    // Use the last loaded data as base; preserve edits made offline.
+    const initial=structuredClone(loadedBase);
+    const remote=validate(await candidate.read());github=candidate;
+    if(dirty){prepareAutoSave(initial);await autosave.update(data);}
+    else{data=remote;prepareAutoSave();render();}
+  }catch(err){connectionError=err.message;syncState('error',err);}
+  finally{retrying=false;$('#sync-retry').disabled=false;}
 };
 await Promise.all([readInitialContent(),fetch('tableData.json').then(r=>{if(!r.ok)throw Error();return r.json();}).then(v=>scores=v).catch(()=>toast('琴谱目录读取失败'))]);
+loadedBase=structuredClone(data);
+$('#sync-retry').disabled=false;
 route();

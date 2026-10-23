@@ -91,3 +91,10 @@ footer { padding-bottom: max(36px, env(safe-area-inset-bottom)); }
 #github-state { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--accent); }
 button:disabled { opacity: .5; cursor: default; }
 hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
+.sync { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 0; }
+#sync-status { overflow-wrap: anywhere; }
+#sync-status[data-state="saved"] { color: var(--accent); }
+#sync-status[data-state="error"] { color: #edb4a3; }
+#sync-retry { white-space: nowrap; }
+[hidden] { display: none !important; }
+@media (max-width: 600px) { footer { flex-wrap: wrap; } .sync { flex-basis: 100%; justify-content: flex-start; } }

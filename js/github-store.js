@@ -26,10 +26,10 @@ export class GitHubStore {
     if(this.#token)headers.Authorization=`Bearer ${this.#token}`;
     let response;
     try{response=await this.request(url,{method,headers,cache:'no-store',signal:AbortSignal.timeout(30000),...(body?{body:JSON.stringify(body)}:{})});}
-    catch{throw Error('无法连接 GitHub，请检查网络后重试。');}
+    catch{const error=Error('无法连接 GitHub，请检查网络后重试。');error.retryable=true;throw error;}
     if(!response.ok){
-      const reasons={401:'令牌无效或已过期，请重新连接。',403:'GitHub 拒绝访问，请检查令牌权限、API 限流及分支保护规则。',404:'找不到仓库、分支或数据文件，请检查配置及令牌授权。',409:'远端文件已更新，已停止保存。请先导出备份，再重新载入远端内容并整理修改。',422:'GitHub 无法接受此次提交，请检查分支保护、文件大小或令牌权限。'};
-      const error=Error(reasons[response.status]||`GitHub 请求失败（${response.status}），请稍后重试。`);error.status=response.status;throw error;
+      const reasons={401:'令牌无效或已过期，请重新连接。',403:'GitHub 拒绝访问，请检查令牌权限、API 限流及分支保护规则。',404:'找不到仓库、分支或数据文件，请检查配置及令牌授权。',409:'远端文件已更新，正在合并最新内容。',422:'GitHub 无法接受此次提交，请检查分支保护、文件大小或令牌权限。'};
+      const error=Error(reasons[response.status]||`GitHub 请求失败（${response.status}），请稍后重试。`);error.status=response.status;error.retryable=response.status>=500||response.status===429;throw error;
     }
     return response.json();
   }

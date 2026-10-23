@@ -19,21 +19,9 @@
       <button role="tab" data-tab="anniversary">一周年 <span>05</span></button>
     </nav>
     <main id="page" role="tabpanel" tabindex="-1"></main>
-    <footer><span>把日子过成值得收藏的片段。</span><button id="storage-button">数据与文件 ↗</button></footer>
+    <footer><span>把日子过成值得收藏的片段。</span><div class="sync"><span id="sync-status" role="status" data-state="saving">正在连接…</span><button id="sync-retry" hidden>重试保存</button></div></footer>
   </div>
   <dialog id="editor"><form id="editor-form"><div class="dialog-head"><h2 id="editor-title"></h2><button type="button" data-close aria-label="关闭">×</button></div><div id="editor-fields"></div><p id="editor-error" role="alert"></p><div class="dialog-actions"><button type="button" data-close>取消</button><button class="primary" type="submit">保存</button></div></form></dialog>
-  <dialog id="storage">
-    <div class="dialog-head"><h2>数据与文件</h2><button data-close aria-label="关闭">×</button></div>
-    <p>页面自动连接 GitHub。编辑先保留在当前页面，点击“提交到 GitHub”保存到仓库。</p>
-    <div class="storage-actions"><button id="github-reload">重新载入仓库内容</button></div>
-    <p id="github-state" role="status">尚未连接 GitHub。</p>
-    <div class="storage-actions"><button id="github-save" class="primary" disabled>提交到 GitHub</button></div>
-    <p class="muted">保存文件为 data/content.json。提交成功后，网站更新需等待 GitHub Pages 部署。公开仓库里的记录也会公开，请勿写入私密内容。</p>
-    <hr>
-    <p id="storage-state">也可以使用本地文件备份。</p>
-    <div class="storage-actions"><button id="bind-directory">绑定项目目录</button><button id="export-data">导出 JSON</button><label class="file-button">导入 JSON<input id="import-data" type="file" accept="application/json,.json"></label></div>
-    <p class="muted">目录保存需浏览器支持及 HTTPS 或 localhost。导入会替换当前数据，请先导出备份。</p>
-  </dialog>
   <div id="toast" role="status"></div>
 </body>
 </html>
