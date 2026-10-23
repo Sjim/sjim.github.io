@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#141615">
   <title>lsn · 生活的切片</title>
+  <script>
+    if(location.protocol==='http:'&&['home.sjim.top','sjim.github.io'].includes(location.hostname)){
+      const secureURL=new URL(location.href);
+      secureURL.protocol='https:';
+      location.replace(secureURL.href);
+    }
+  </script>
   <link rel="stylesheet" href="css/main.css">
   <script type="module" src="js/main.js"></script>
 </head>
